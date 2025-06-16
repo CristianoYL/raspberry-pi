@@ -1,0 +1,40 @@
+#!/bin/sh
+
+# -------- Get the current temperature --------
+TEMP_C=$(/usr/bin/vcgencmd measure_temp | awk -F"=" '{print $2}' | tr -d "'C")
+
+# -------- Bar settings --------
+BAR_LEN=30 # Bar length (characters)
+TEMP_MAX=100
+
+# -------- Calculate bar positions --------
+# We'll use "awk" for floating-point math, and integer math in sh
+BAR=$(awk -v temp="$TEMP_C" -v nbar="$BAR_LEN" -v tmax="$TEMP_MAX" '
+BEGIN {
+    ratio = temp / tmax
+    n_colored = int(ratio * nbar)
+    
+    if (temp >= 80) color = "\033[31m";  # red
+    else if (temp >= 60) color = "\033[33m";  # yellow
+    else color = "\033[32m"    # green
+    
+    bar = ""
+    for (i = 0; i < nbar; i++) {
+        if (i <= n_colored) bar = bar color "|\033[0m";
+        else bar = bar " "  # empty
+    }
+    printf "[%s %s%s°C\033[0m]", bar, color, temp
+}')
+
+# -------- Color the temperature text itself similarly --------
+TEMP_C_INT=$(printf "%.0f" "$TEMP_C")
+if [ "$TEMP_C_INT" -ge 80 ]; then
+    TEMP_COLOR="\033[31m"  # Red
+elif [ "$TEMP_C_INT" -ge 60 ]; then
+    TEMP_COLOR="\033[33m"  # Yellow
+else
+    TEMP_COLOR="\033[32m"  # Green
+fi
+
+# -------- Print the htop-style bar --------
+echo " * System Temp:    $BAR"

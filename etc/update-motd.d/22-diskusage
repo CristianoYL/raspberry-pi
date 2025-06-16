@@ -1,0 +1,35 @@
+#!/bin/sh
+BAR_LEN=30
+DISK_USAGE=$(df -BG --output=used,size,avail,pcent / | awk 'NR==2{
+    used=$1; sub("G","",used)
+    total=$2; sub("G","",total)
+    free=$3; sub("G","",free)
+    ratio=$4; sub("%","",ratio)
+
+    if (ratio > 80) color="\033[31m";
+    else if (ratio > 60) color="\033[33m";
+    else color="\033[32m";
+
+    printf "%s%.2fG\033[0m/%.2fG (%.2fG free)", color, used, total, free
+}')
+DISK_BAR=$(df -BG --output=used,size,avail,pcent / | awk -v nbar=$BAR_LEN 'NR==2 {
+    used=$1; sub("G","",used)
+    total=$2; sub("G","",total)
+    free=$3; sub("G","",free)
+    pcent=$4; sub("%","",pcent)
+
+    if (pcent > 80) color="\033[31m"; # red: > 80%
+    else if (pcent > 60) color="\033[33m"; # yellow > 60%
+    else color="\033[32m";  # green <= 60%
+
+    n_used = int(pcent / 100 * nbar)
+    bar = ""
+    for (i=1; i<=nbar; i++) {
+        if (i<=n_used) bar = bar color "|";
+        else bar = bar " ";
+    }
+    printf "[%s %s%.2f%%\033[0m]", bar, color, pcent
+}')
+
+echo " * Disk usage:     $DISK_BAR"
+echo "                   $DISK_USAGE"

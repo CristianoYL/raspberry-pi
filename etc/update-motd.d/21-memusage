@@ -1,0 +1,51 @@
+#!/bin/sh
+BAR_LEN=30 # adjust bar length
+MEM_USAGE=$(free -b | awk '/^Mem:/ {
+    # each column is in Bytes
+    total = $2/1024/1024/1024;  # convert to GiB
+    used = $3/1024/1024/1024;
+    free = $4/1024/1024/1024;
+    available = $7/1024/1024/1024;
+    ratio_used  = $3 / $2; # use Byte to calculate %
+    
+    if (ratio_used > 0.8) color="\033[31m";  # Red if >80%
+    else if (ratio_used > 0.6) color="\033[33m";  # Yellow if >60%
+    else color="\033[32m";  # Green if used <= 60%
+
+    printf "%s%.2fG\033[0m/%.0fG (%.2fG free, %.2fG available)", color, used, total, free, available
+}')
+
+# generate an htop-like memory usage bar
+MEM_BAR=$(free -b | awk -v nbar=$BAR_LEN '
+/^Mem:/ {
+   # each column is in Bytes
+    total = $2;
+    used = $3;
+    free = $4
+    cache = $6 # each column is in Bytes
+    total = $2;
+    used = $3;
+    free = $4
+    cache = $6
+
+    ratio_used  = $3/$2;
+    ratio_cache = $6/$2;
+
+    n_used  = int(ratio_used * nbar);
+    n_cache = int(ratio_cache * nbar);
+
+    if (ratio_used > 0.8) color="\033[31m";  # Red if >80%
+    else if (ratio_used > 0.6) color="\033[33m";  # Yellow if >60%
+    else color="\033[32m";  # Green if used <= 60%
+
+    bar = "";
+    for (i = 1; i <= nbar; i++) {
+        if (i <= n_used) bar = bar color "|";
+        else if (i <= n_used + n_cache) bar = bar "\033[35m|";  # Magenta for cache
+        else bar = bar " "; # empty for unused
+    }
+    printf "[%s %s%.2f%%\033[0m]", bar, color, ratio_used*100
+}')
+
+echo " * Memory usage:   $MEM_BAR"
+echo "                   $MEM_USAGE"

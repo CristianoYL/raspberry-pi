@@ -1,0 +1,31 @@
+#!/bin/sh
+
+HOSTNAME=$(hostname)
+
+# Calculate loads as a percentage of total CPU capacity
+CORES=$(nproc)
+read LOAD1 LOAD5 LOAD15 REST < /proc/loadavg
+LOAD1_PCT=$(awk -v l="$LOAD1" -v c="$CORES" 'BEGIN { printf("%.0f", (l/c)*100) }')
+LOAD5_PCT=$(awk -v l="$LOAD5" -v c="$CORES" 'BEGIN { printf("%.0f", (l/c)*100) }')
+LOAD15_PCT=$(awk -v l="$LOAD15" -v c="$CORES" 'BEGIN { printf("%.0f", (l/c)*100) }')
+
+# Function to choose a color based on percentage
+color_for_pct() {
+  pct=$1
+  if [ "$pct" -gt 80 ]; then
+    printf '\033[31m'   # Red
+  elif [ "$pct" -gt 60 ]; then
+    printf '\033[33m'   # Yellow
+  else
+    printf '\033[32m'   # Green
+  fi
+}
+
+CLR1=$(color_for_pct "$LOAD1_PCT")
+CLR5=$(color_for_pct "$LOAD5_PCT")
+CLR15=$(color_for_pct "$LOAD15_PCT")
+RESET="\033[0m"
+echo "Welcome to $HOSTNAME!"
+echo
+#echo " * System load:    1 min: ${LOAD1_PCT}%, 5 min: ${LOAD5_PCT}%, 15 min: ${LOAD15_PCT}%"
+printf " * System load:    1 min: ${CLR1}%s%%${RESET}, 5 min: ${CLR5}%s%%${RESET}, 15 min: ${CLR15}%s%%${RESET}\n" "$LOAD1_PCT" "$LOAD5_PCT" "$LOAD15_PCT"

@@ -1,0 +1,17 @@
+#!/bin/sh
+
+UPTIME=$(uptime -p)
+
+echo " * Uptime:         $UPTIME"
+# Show info about available updates
+if command -v apt >/dev/null 2>&1; then
+    UPDATES=$(apt list --upgradeable 2>/dev/null | grep -vc Listing)
+    if [ "$UPDATES" -gt 0 ]; then
+        echo " * $UPDATES package(s) can be updated."
+    else
+        echo " * All packages are up to date."
+    fi
+fi
+echo " * Users logged in: $(who | awk '{print $1}' | sort | wc -l)"
+who
+echo
