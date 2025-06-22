@@ -1,0 +1,69 @@
+services:
+  jellyfin:
+    image: jellyfin/jellyfin
+    container_name: jellyfin
+    user: 1000:1000
+    network_mode: 'host'
+    volumes:
+      # persist configs and cache using docker volume
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+      # bind mount a local storage
+      - type: bind
+        source: /home/yl/Documents/jellyfin/media
+        target: /media
+        read_only: true
+      # bind mount an smb drive
+      - type: bind
+        source: /mnt/smb
+        target: /smb
+        read_only: true
+    restart: 'unless-stopped'
+    # Optional - may be necessary for docker healthcheck to pass if running in host network mode
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: 'unless-stopped'
+    ports:
+      - '8080:8080'
+    volumes:
+      - open-webui:/app/backend/data
+    env_file:
+      - .open_webui.env
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    ports:
+      # DNS Ports
+      - '53:53/tcp'
+      - '53:53/udp'
+      # Default HTTP Port
+      - '3001:80/tcp'
+      # Default HTTPs Port. FTL will generate a self-signed certificate
+      - '443:443/tcp'
+      # Uncomment the line below if you are using Pi-hole as your DHCP server
+      #- "67:67/udp"
+      # Uncomment the line below if you are using Pi-hole as your NTP server
+      #- "123:123/udp"
+    env_file:
+      - .pihole.env
+    volumes:
+      - pihole:/etc/pihole
+    restart: unless-stopped
+  iperf3:
+    container_name: iperf3-server
+    image: networkstatic/iperf3:latest
+    ports:
+      - '5201:5201'
+    command: '-s'
+    restart: unless-stopped
+
+volumes:
+  open-webui:
+    # use an external volume for extra safety, prevent deletion from docker compose
+    external: true
+  jellyfin-config:
+  jellyfin-cache:
+  pihole:
