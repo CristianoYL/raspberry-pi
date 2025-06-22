@@ -1,0 +1,5 @@
+#!/bin/sh
+
+UPTIME=$(uptime -p)
+
+echo " * Uptime:         $UPTIME"

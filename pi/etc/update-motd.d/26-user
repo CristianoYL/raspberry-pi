@@ -1,0 +1,5 @@
+#!/bin/sh
+
+echo " * Users logged in: $(who | awk '{print $1}' | sort | wc -l)"
+who
+echo
