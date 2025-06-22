@@ -1,4 +1,6 @@
-Copy the `/etc/update-motd.d` folder content into the same directory on Pi and you'll get a nice login message (Message Of The Day) like this:
+# MOTD
+
+Copy the [/etc/update-motd.d/](/pi/etc/update-motd.d/) folder content into the same directory on Pi and you'll get a nice login message (Message Of The Day) like this:
 
 ![nicer MOTD image](motd_example.png)
 
