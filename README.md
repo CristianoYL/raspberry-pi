@@ -1,18 +1,29 @@
-# Raspberry Pi Backups
+# SBC Homelab
 
-This repo is a backup of Raspberry Pi 5 configs and services.
+Configs, services, and utilities for single-board computers (Raspberry Pi, Orange Pi, etc.). Everything here is designed to be portable across Linux-based SBCs.
 
-# Folder Structure
+## Folder Structure
 
-- `pi`: contains actual config file for Raspberry Pi, should be placed at the corresponding location unless otherwise specified.
-- `docs`: documentations for each backup
+- `configs/` — System configuration files (MOTD, etc.)
+- `services/` — Docker-managed services
+- `scripts/` — Standalone utilities and tools
+- `docs/` — Additional documentation
 
-# Table of Content
+## Table of Contents
 
-| Name       | Category       | Purpose                                     | Detail                                                         |
-| ---------- | -------------- | ------------------------------------------- | -------------------------------------------------------------- |
-| MOTD       | Server Configs | Display a nicer Message Of The Day on login | [docs/motd](docs/motd/README.md)                               |
-| Jellyfin   | Service        | Media Streaming Server                      | [services/jellyfin/README.md](services/jellyfin/README.md)     |
-| Open WebUI | Service        | GPT Web Service                             | [services/open_webui/README.md](services/open_webui/README.md) |
-| Pi-Hole    | Service        | Ad-blocking DNS server                      | [services/pihole/README.md](services/pihole/README.md)         |
-| iperf3     | Service        | Internet speed test server                  | [services/iperf3/README.md](services/iperf3/README.md)         |
+| Name            | Category | Purpose                              | Detail |
+|-----------------|----------|--------------------------------------|--------|
+| MOTD            | Config   | Custom login message with system stats | [configs/motd](configs/motd/README.md) |
+| Jellyfin        | Service  | Media streaming server               | [services/jellyfin](services/jellyfin/README.md) |
+| Open WebUI      | Service  | LLM web interface                    | [services/open_webui](services/open_webui/README.md) |
+| Pi-Hole         | Service  | Ad-blocking DNS server               | [services/pihole](services/pihole/README.md) |
+| iperf3          | Service  | Network speed test server            | [services/iperf3](services/iperf3/README.md) |
+| Nginx           | Service  | Reverse proxy                        | [services/nginx](services/nginx/README.md) |
+| SBC Stress Test | Script   | Hardware stress test with thermal monitoring | [scripts/sbc-stress-test](scripts/sbc-stress-test/README.md) |
+
+## Platform Compatibility
+
+Most components work on any Linux-based SBC. Platform-specific code (like temperature reading) includes fallbacks for portability:
+
+- **Raspberry Pi**: Uses `vcgencmd` when available
+- **Other SBCs**: Falls back to `/sys/class/thermal/` (standard Linux)

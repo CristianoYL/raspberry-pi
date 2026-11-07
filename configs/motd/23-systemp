@@ -1,7 +1,15 @@
 #!/bin/sh
 
 # -------- Get the current temperature --------
-TEMP_C=$(/usr/bin/vcgencmd measure_temp | awk -F"=" '{print $2}' | tr -d "'C")
+# Try vcgencmd first (Raspberry Pi), fall back to thermal_zone (generic Linux)
+if command -v vcgencmd >/dev/null 2>&1; then
+    TEMP_C=$(vcgencmd measure_temp | awk -F"=" '{print $2}' | tr -d "'C")
+elif [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+    TEMP_C=$(awk '{printf "%.1f", $1/1000}' /sys/class/thermal/thermal_zone0/temp)
+else
+    echo " * System Temp:    [N/A - no thermal sensor found]"
+    exit 0
+fi
 
 # -------- Bar settings --------
 BAR_LEN=30 # Bar length (characters)
