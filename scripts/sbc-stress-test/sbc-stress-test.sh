@@ -271,9 +271,10 @@ if [ -f "$THERMAL_LOG" ]; then
 fi
 
 # Extract stress-ng metrics
-VERIFY_FAILURES=$(grep -ciE "fail|error" "$STRESS_LOG" 2>/dev/null) || VERIFY_FAILURES="0"
-# Match data lines (contain stressor name + numbers), not headers; take last bogo ops/s value
-BOGO_OPS=$(awk '/stress-ng:.*info:/ && /[0-9]+\.[0-9]+[[:space:]]+[0-9]+\.[0-9]+$/ {ops=$(NF-1)} END {if(ops) printf "%.2f", ops; else print "N/A"}' "$STRESS_LOG" 2>/dev/null) || BOGO_OPS="N/A"
+# Count actual failures: "failed: N" where N > 0 (not "failed: 0" which appears in every summary)
+VERIFY_FAILURES=$(grep -cE 'failed:[[:space:]]*[1-9]' "$STRESS_LOG" 2>/dev/null) || VERIFY_FAILURES="0"
+# Match metrics data lines (metrc:), not headers; take last bogo ops/s value (real time column)
+BOGO_OPS=$(awk '/stress-ng:.*metrc:/ && /[0-9]+\.[0-9]+[[:space:]]+[0-9]+\.[0-9]+$/ {ops=$(NF-1)} END {if(ops) printf "%.2f", ops; else print "N/A"}' "$STRESS_LOG" 2>/dev/null) || BOGO_OPS="N/A"
 
 # Check kernel state
 BOOT_ERRORS=$(dmesg --level=err,crit,alert,emerg 2>/dev/null | awk '$1 ~ /^\[/ {gsub(/[\[\]]/, "", $1); if ($1+0 <= 30) count++} END {print count+0}') || BOOT_ERRORS="0"
