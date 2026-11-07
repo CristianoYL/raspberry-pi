@@ -1,6 +1,6 @@
 #!/bin/bash
 # sbc-stress-test.sh — adaptive stress test for any SBC
-# Usage: sudo ./sbc-stress-test.sh [duration_minutes]
+# Usage: sudo ./sbc-stress-test.sh [-d minutes] [-p io_path]
 
 set -euo pipefail
 
@@ -22,20 +22,47 @@ done
 # ──────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────
-DURATION="${1:-60}"  # default 60 minutes, override with first argument
+DURATION=60
+IO_TEST_DIR=""
+
+usage() {
+  echo "Usage: sudo $0 [-d minutes] [-p io_path]"
+  echo "  -d  Duration in minutes (default: 60)"
+  echo "  -p  Path for I/O test files (default: script directory)"
+  exit 1
+}
+
+while getopts "d:p:h" opt; do
+  case $opt in
+    d) DURATION="$OPTARG" ;;
+    p) IO_TEST_DIR="$OPTARG" ;;
+    h) usage ;;
+    *) usage ;;
+  esac
+done
+
+if [[ ! "$DURATION" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Duration must be a positive whole number of minutes." >&2
+  exit 1
+fi
 
 # ──────────────────────────────────────────────
 # Resolve real user (even when run with sudo)
 # ──────────────────────────────────────────────
 REAL_USER="${SUDO_USER:-$USER}"
-REAL_HOME=$(eval echo ~"$REAL_USER")
+REAL_GROUP=$(id -gn "$REAL_USER")
 
 # Log to the same directory as the script
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
-LOG_FILE="$LOG_DIR/stress-test-$(hostname)-$(date +%Y%m%d-%H%M%S).log"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+# Default IO test path if not specified
+if [[ -z "$IO_TEST_DIR" ]]; then
+  IO_TEST_DIR="$SCRIPT_DIR/io-test"
+fi
+mkdir -p "$IO_TEST_DIR"
 THERMAL_LOG="$LOG_DIR/thermal-$(hostname)-$TIMESTAMP.csv"
 STRESS_LOG="$LOG_DIR/stress-$(hostname)-$TIMESTAMP.log"
 
@@ -89,7 +116,7 @@ box_line "Duration:    ${DURATION} minutes"
 echo "╠══════════════════════════════════════════════╣"
 box_line "Plan:"
 box_line "  CPU:  ${CPU_CORES} workers (all cores)"
-box_line "  RAM:  ${VM_WORKERS} workers, ${USABLE_RAM_MB} MB"
+box_line "  RAM:  ${VM_WORKERS} workers, ${USABLE_RAM_MB} MB total"
 box_line "  I/O:  ${HDD_WORKERS} workers"
 box_line "Logs:"
 echo "║     Thermal:  ${THERMAL_LOG}"
@@ -103,7 +130,6 @@ read -p "Start test? [y/N] " confirm
 # Thermal monitor (background)
 # ──────────────────────────────────────────────
 monitor_thermals() {
-  local max_temp=0
   echo "timestamp,temp_mC,load_1m,load_5m,load_15m,mem_used_mb,mem_total_mb" > "$THERMAL_LOG"
 
   while true; do
@@ -113,17 +139,12 @@ monitor_thermals() {
     fi
 
     local load
-    load=$(cat /proc/loadavg | awk '{print $1","$2","$3}')
+    load=$(awk '{print $1","$2","$3}' /proc/loadavg)
 
     local mem
     mem=$(free -m | awk '/Mem:/ {print $3","$2}')
 
     echo "$(date '+%Y-%m-%d %H:%M:%S'),$temp,$load,$mem" >> "$THERMAL_LOG"
-
-    # Track max temp
-    if [ "$temp" != "N/A" ] && [ "$temp" -gt "$max_temp" ] 2>/dev/null; then
-      max_temp=$temp
-    fi
 
     # Warn if too hot (85°C = 85000 millidegrees)
     if [ "$temp" != "N/A" ] && [ "$temp" -gt 85000 ] 2>/dev/null; then
@@ -136,24 +157,37 @@ monitor_thermals() {
 
 monitor_thermals &
 MONITOR_PID=$!
-trap "kill $MONITOR_PID 2>/dev/null; wait $MONITOR_PID 2>/dev/null" EXIT
+
+cleanup() {
+  local rc=$?
+  trap - EXIT
+  if [[ -n "${MONITOR_PID:-}" ]]; then
+    kill "$MONITOR_PID" 2>/dev/null || true
+    wait "$MONITOR_PID" 2>/dev/null || true
+  fi
+  chown "$REAL_USER:$REAL_GROUP" "$THERMAL_LOG" "$STRESS_LOG" 2>/dev/null || true
+  return "$rc"
+}
+trap cleanup EXIT
 
 # ──────────────────────────────────────────────
-# Phase 1: Memory test (most critical)
+# Phase 1: Memory stress
 # ──────────────────────────────────────────────
 PHASE_DURATION=$(( DURATION / 3 ))
 echo ""
-echo "━━━ Phase 1/3: Memory test (${PHASE_DURATION} min) ━━━"
-echo "    Testing ${USABLE_RAM_MB} MB with memtester"
+echo "━━━ Phase 1/3: Memory stress (${PHASE_DURATION} min) ━━━"
+echo "    ${VM_WORKERS} workers, ${USABLE_RAM_MB} MB total"
 
-# memtester doesn't have a timeout flag, so we background it and kill after duration
-sudo memtester "${USABLE_RAM_MB}M" 0 > >(tee -a "$STRESS_LOG") 2>&1 &
-MEMTEST_PID=$!
-
-sleep $(( PHASE_DURATION * 60 ))
-
-kill "$MEMTEST_PID" 2>/dev/null
-wait "$MEMTEST_PID" 2>/dev/null || true
+stress-ng \
+  --vm "$VM_WORKERS" \
+  --vm-bytes "${USABLE_RAM_MB}M" \
+  --vm-method all \
+  --vm-keep \
+  --vm-populate \
+  --verify \
+  --timeout "${PHASE_DURATION}m" \
+  --metrics-brief \
+  2>&1 | tee -a "$STRESS_LOG"
 
 echo ""
 echo "✅ Phase 1 complete"
@@ -179,27 +213,22 @@ echo "✅ Phase 2 complete"
 # ──────────────────────────────────────────────
 echo ""
 echo "━━━ Phase 3/3: Combined stress (${PHASE_DURATION} min) ━━━"
-echo "    CPU(${CPU_CORES}) + RAM(${USABLE_RAM_MB}MB) + I/O(${HDD_WORKERS})"
-
-# RAM — memtester in background
-sudo memtester "${USABLE_RAM_MB}M" 0 > >(tee -a "$STRESS_LOG") 2>&1 &
-MEMTEST_PID=$!
+echo "    CPU(${CPU_CORES}) + RAM(${USABLE_RAM_MB} MB) + I/O(${HDD_WORKERS})"
 
 stress-ng \
   --cpu "$CPU_CORES" \
+  --cpu-method all \
+  --vm "$VM_WORKERS" \
+  --vm-bytes "${USABLE_RAM_MB}M" \
+  --vm-method all \
+  --vm-keep \
+  --vm-populate \
   --hdd "$HDD_WORKERS" \
+  --temp-path "$IO_TEST_DIR" \
   --verify \
   --timeout "${PHASE_DURATION}m" \
   --metrics-brief \
-  2>&1 | tee -a "$STRESS_LOG" &
-STRESS_PID=$!
-
-# Wait for stress-ng to finish (it has its own timeout)
-wait "$STRESS_PID" 2>/dev/null || true
-
-# Then kill memtester (no built-in timeout)
-kill "$MEMTEST_PID" 2>/dev/null
-wait "$MEMTEST_PID" 2>/dev/null || true
+  2>&1 | tee -a "$STRESS_LOG"
 
 echo ""
 echo "✅ Phase 3 complete"
@@ -207,9 +236,9 @@ echo "✅ Phase 3 complete"
 # ──────────────────────────────────────────────
 # Summary
 # ──────────────────────────────────────────────
-kill $MONITOR_PID 2>/dev/null
-wait $MONITOR_PID 2>/dev/null || true
-trap - EXIT
+kill "$MONITOR_PID" 2>/dev/null || true
+wait "$MONITOR_PID" 2>/dev/null || true
+MONITOR_PID=""
 
 # Extract peak temp from log
 PEAK_TEMP="N/A"
@@ -241,5 +270,3 @@ echo "  dmesg --level=err,crit,alert,emerg | awk '$1 ~ /^\[/ {gsub(/[\[\]]/, "",
 echo ""
 echo "Review thermal log:"
 echo "  column -t -s',' $THERMAL_LOG | less"
-
-chown -R "$REAL_USER":"$REAL_USER" "$LOG_DIR"
