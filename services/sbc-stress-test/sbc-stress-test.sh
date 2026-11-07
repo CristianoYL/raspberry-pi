@@ -22,12 +22,12 @@ done
 # ──────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────
-DURATION=60
+DURATION=3
 IO_TEST_DIR=""
 
 usage() {
   echo "Usage: sudo $0 [-d minutes] [-p io_path]"
-  echo "  -d  Duration in minutes (default: 60)"
+  echo "  -d  Duration in minutes (default: $DURATION)"
   echo "  -p  Path for I/O test files (default: script directory)"
   exit 1
 }
