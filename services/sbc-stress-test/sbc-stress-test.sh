@@ -97,12 +97,13 @@ done
 # Define the box width (inner content between the ║ borders)
 BOX_WIDTH=44
 # Helper function — prints a line with right-aligned border
-# Adjusts for multi-byte UTF-8 characters (e.g., °) that display as single column
+# printf %-Ns pads by bytes, so we adjust for multi-byte UTF-8 characters
 box_line() {
   local content="$1"
-  local byte_len=${#content}
-  local char_len
-  char_len=$(printf '%s' "$content" | wc -m | tr -d ' ')
+  local byte_len char_len
+  byte_len=$(printf '%s' "$content" | wc -c | tr -d ' ')
+  char_len=$(printf '%s' "$content" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')
+  # Extra bytes beyond char count = multi-byte chars; add that to width
   local width=$(( BOX_WIDTH + byte_len - char_len ))
   printf "║  %-${width}s║\n" "$content"
 }
@@ -246,15 +247,37 @@ kill "$MONITOR_PID" 2>/dev/null || true
 wait "$MONITOR_PID" 2>/dev/null || true
 MONITOR_PID=""
 
-# Extract peak temp from log
+# Extract thermal metrics
 PEAK_TEMP="N/A"
+MEAN_TEMP="N/A"
+TEMP_STDDEV="N/A"
+SAMPLES_ABOVE_80="0"
 if [ -f "$THERMAL_LOG" ]; then
   PEAK_TEMP=$(awk -F',' 'NR>1 && $2 != "N/A" {if($2+0 > max) max=$2+0} END {if(max) printf "%.1f°C", max/1000; else print "N/A"}' "$THERMAL_LOG")
+  read -r MEAN_TEMP TEMP_STDDEV < <(awk -F',' 'NR>1 && $2 != "N/A" {sum+=$2; sumsq+=$2*$2; n++} END {if(n>0) {mean=sum/n; var=sumsq/n-mean*mean; if(var<0) var=0; printf "%.1f°C %.1f°C", mean/1000, sqrt(var)/1000} else print "N/A N/A"}' "$THERMAL_LOG")
+  SAMPLES_ABOVE_80=$(awk -F',' 'NR>1 && $2 != "N/A" && $2 > 80000 {count++} END {print count+0}' "$THERMAL_LOG")
 fi
 
+# Extract stress-ng metrics
+VERIFY_FAILURES=$(grep -ciE "fail|error" "$STRESS_LOG" 2>/dev/null || echo "0")
+BOGO_OPS=$(awk '/bogo ops\/s/ {ops=$NF} END {if(ops) print ops; else print "N/A"}' "$STRESS_LOG" 2>/dev/null)
+
+# Check kernel state
 BOOT_ERRORS=$(dmesg --level=err,crit,alert,emerg 2>/dev/null | awk '$1 ~ /^\[/ {gsub(/[\[\]]/, "", $1); if ($1+0 <= 30) count++} END {print count+0}')
 RUNTIME_ERRORS=$(dmesg --level=err,crit,alert,emerg 2>/dev/null | awk '$1 ~ /^\[/ {gsub(/[\[\]]/, "", $1); if ($1+0 > 30) count++} END {print count+0}')
+THROTTLE_EVENTS=$(dmesg 2>/dev/null | grep -ci throttl || echo "0")
 
+# Determine overall status
+STATUS="PASS"
+if [ "$VERIFY_FAILURES" -gt 0 ] 2>/dev/null; then
+  STATUS="FAIL - verification errors"
+elif [ "$THROTTLE_EVENTS" -gt 0 ] 2>/dev/null; then
+  STATUS="WARN - throttling detected"
+elif [ "$RUNTIME_ERRORS" -gt 0 ] 2>/dev/null; then
+  STATUS="WARN - kernel errors"
+elif [ "$SAMPLES_ABOVE_80" -gt 0 ] 2>/dev/null; then
+  STATUS="WARN - temp >80C"
+fi
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"
@@ -262,17 +285,24 @@ echo "║         Test Complete                        ║"
 echo "╠══════════════════════════════════════════════╣"
 box_line "Host:        $HOSTNAME"
 box_line "Duration:    ${DURATION} minutes"
-box_line "Peak temp:   ${PEAK_TEMP} "
-echo "║  Log:         ${THERMAL_LOG}"
-echo "║               ${STRESS_LOG}"
-box_line "Kern errs: ${RUNTIME_ERRORS} runtime, ${BOOT_ERRORS} boot (ignored)"
+box_line "Status:      ${STATUS}"
+echo "╠══════════════════════════════════════════════╣"
+box_line "Peak temp:   ${PEAK_TEMP}"
+box_line "Mean temp:   ${MEAN_TEMP} (stddev ${TEMP_STDDEV})"
+box_line "Samples >80C: ${SAMPLES_ABOVE_80}"
+echo "╠══════════════════════════════════════════════╣"
+box_line "Verify errors:   ${VERIFY_FAILURES}"
+box_line "Throttle events: ${THROTTLE_EVENTS}"
+box_line "Kernel errors:   ${RUNTIME_ERRORS} runtime"
+box_line "Last bogo ops/s: ${BOGO_OPS}"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
-echo "Review kernel errors:"
-echo "  dmesg --level=err,crit,alert,emerg"
+echo "Logs:"
+echo "  $THERMAL_LOG"
+echo "  $STRESS_LOG"
 echo ""
-echo "Optionally, exclude erors during boot (beyond the first 30 seconds):"
-echo "  dmesg --level=err,crit,alert,emerg | awk '$1 ~ /^\[/ {gsub(/[\[\]]/, "", $1); if ($1+0 > 30) print}'"
-echo ""
-echo "Review thermal log:"
-echo "  column -t -s',' $THERMAL_LOG | less"
+echo "Review commands:"
+echo "  column -t -s',' $THERMAL_LOG | less    # thermal data"
+echo "  grep 'bogo ops' $STRESS_LOG            # throughput"
+echo "  dmesg | grep -i throttl                # throttling"
+echo "  dmesg --level=err,crit,alert,emerg     # kernel errors"
