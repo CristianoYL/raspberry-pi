@@ -253,19 +253,21 @@ MEAN_TEMP="N/A"
 TEMP_STDDEV="N/A"
 SAMPLES_ABOVE_80="0"
 if [ -f "$THERMAL_LOG" ]; then
-  PEAK_TEMP=$(awk -F',' 'NR>1 && $2 != "N/A" {if($2+0 > max) max=$2+0} END {if(max) printf "%.1f°C", max/1000; else print "N/A"}' "$THERMAL_LOG")
-  read -r MEAN_TEMP TEMP_STDDEV < <(awk -F',' 'NR>1 && $2 != "N/A" {sum+=$2; sumsq+=$2*$2; n++} END {if(n>0) {mean=sum/n; var=sumsq/n-mean*mean; if(var<0) var=0; printf "%.1f°C %.1f°C", mean/1000, sqrt(var)/1000} else print "N/A N/A"}' "$THERMAL_LOG")
-  SAMPLES_ABOVE_80=$(awk -F',' 'NR>1 && $2 != "N/A" && $2 > 80000 {count++} END {print count+0}' "$THERMAL_LOG")
+  PEAK_TEMP=$(awk -F',' 'NR>1 && $2 != "N/A" {if($2+0 > max) max=$2+0} END {if(max) printf "%.1f°C", max/1000; else print "N/A"}' "$THERMAL_LOG") || true
+  thermal_stats=$(awk -F',' 'NR>1 && $2 != "N/A" {sum+=$2; sumsq+=$2*$2; n++} END {if(n>0) {mean=sum/n; var=sumsq/n-mean*mean; if(var<0) var=0; printf "%.1f°C %.1f°C", mean/1000, sqrt(var)/1000} else print "N/A N/A"}' "$THERMAL_LOG") || true
+  MEAN_TEMP="${thermal_stats%% *}"
+  TEMP_STDDEV="${thermal_stats##* }"
+  SAMPLES_ABOVE_80=$(awk -F',' 'NR>1 && $2 != "N/A" && $2 > 80000 {count++} END {print count+0}' "$THERMAL_LOG") || true
 fi
 
 # Extract stress-ng metrics
-VERIFY_FAILURES=$(grep -ciE "fail|error" "$STRESS_LOG" 2>/dev/null || echo "0")
-BOGO_OPS=$(awk '/bogo ops\/s/ {ops=$NF} END {if(ops) print ops; else print "N/A"}' "$STRESS_LOG" 2>/dev/null)
+VERIFY_FAILURES=$(grep -ciE "fail|error" "$STRESS_LOG" 2>/dev/null) || VERIFY_FAILURES="0"
+BOGO_OPS=$(awk '/bogo ops\/s/ {ops=$NF} END {if(ops) print ops; else print "N/A"}' "$STRESS_LOG" 2>/dev/null) || BOGO_OPS="N/A"
 
 # Check kernel state
-BOOT_ERRORS=$(dmesg --level=err,crit,alert,emerg 2>/dev/null | awk '$1 ~ /^\[/ {gsub(/[\[\]]/, "", $1); if ($1+0 <= 30) count++} END {print count+0}')
-RUNTIME_ERRORS=$(dmesg --level=err,crit,alert,emerg 2>/dev/null | awk '$1 ~ /^\[/ {gsub(/[\[\]]/, "", $1); if ($1+0 > 30) count++} END {print count+0}')
-THROTTLE_EVENTS=$(dmesg 2>/dev/null | grep -ci throttl || echo "0")
+BOOT_ERRORS=$(dmesg --level=err,crit,alert,emerg 2>/dev/null | awk '$1 ~ /^\[/ {gsub(/[\[\]]/, "", $1); if ($1+0 <= 30) count++} END {print count+0}') || BOOT_ERRORS="0"
+RUNTIME_ERRORS=$(dmesg --level=err,crit,alert,emerg 2>/dev/null | awk '$1 ~ /^\[/ {gsub(/[\[\]]/, "", $1); if ($1+0 > 30) count++} END {print count+0}') || RUNTIME_ERRORS="0"
+THROTTLE_EVENTS=$(dmesg 2>/dev/null | grep -ci throttl) || THROTTLE_EVENTS="0"
 
 # Determine overall status
 STATUS="PASS"
