@@ -61,6 +61,10 @@ TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 # Default IO test path if not specified
 if [[ -z "$IO_TEST_DIR" ]]; then
   IO_TEST_DIR="$SCRIPT_DIR/io-test"
+  IO_TEST_DIR_DISPLAY="./io-test"
+else
+  # Keep user's original path for display (relative or absolute as provided)
+  IO_TEST_DIR_DISPLAY="$IO_TEST_DIR"
 fi
 mkdir -p "$IO_TEST_DIR"
 THERMAL_LOG="$LOG_DIR/thermal-$(hostname)-$TIMESTAMP.csv"
@@ -130,7 +134,7 @@ echo "╠═══════════════════════�
 box_line "Plan:"
 box_line "  CPU:  ${CPU_CORES} workers (all cores)"
 box_line "  RAM:  ${VM_WORKERS} workers, ${USABLE_RAM_MB} MB total"
-box_line "  I/O:  ${HDD_WORKERS} workers @ ${IO_TEST_DIR}"
+box_line "  I/O:  ${HDD_WORKERS} workers @ ${IO_TEST_DIR_DISPLAY}"
 box_line "Logs:"
 echo "║     Thermal:  ${THERMAL_LOG}"
 echo "║     Stress:   ${STRESS_LOG}"
