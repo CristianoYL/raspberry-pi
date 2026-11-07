@@ -97,8 +97,14 @@ done
 # Define the box width (inner content between the ║ borders)
 BOX_WIDTH=44
 # Helper function — prints a line with right-aligned border
+# Adjusts for multi-byte UTF-8 characters (e.g., °) that display as single column
 box_line() {
-  printf "║  %-${BOX_WIDTH}s║\n" "$1"
+  local content="$1"
+  local byte_len=${#content}
+  local char_len
+  char_len=$(printf '%s' "$content" | wc -m | tr -d ' ')
+  local width=$(( BOX_WIDTH + byte_len - char_len ))
+  printf "║  %-${width}s║\n" "$content"
 }
 
 # ──────────────────────────────────────────────
