@@ -20,6 +20,7 @@ Configs, services, and utilities for single-board computers (Raspberry Pi, Orang
 | iperf3          | Service  | Network speed test server            | [services/iperf3](services/iperf3/README.md) |
 | Nginx           | Service  | Reverse proxy                        | [services/nginx](services/nginx/README.md) |
 | SBC Stress Test | Script   | Hardware stress test with thermal monitoring | [scripts/sbc-stress-test](scripts/sbc-stress-test/README.md) |
+| SBC Temp        | Script   | Temperature monitoring (generic + board-specific) | [scripts/sbc-temp](scripts/sbc-temp/README.md) |
 
 ## Platform Compatibility
 

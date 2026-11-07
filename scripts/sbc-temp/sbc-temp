@@ -1,0 +1,142 @@
+#!/bin/sh
+# sbc-temp — display all thermal sensors on any SBC
+# Usage: sbc-temp [-w]
+
+set -eu
+
+# Collect thermal zone names for deduplication (normalized: dashes to underscores)
+THERMAL_ZONE_NAMES=""
+
+collect_thermal_zone_names() {
+    THERMAL_ZONE_NAMES=""
+    for zone in /sys/class/thermal/thermal_zone*; do
+        [ -r "$zone/type" ] || continue
+        name=$(cat "$zone/type" 2>/dev/null || echo "")
+        # Normalize: convert dashes to underscores for comparison
+        normalized=$(echo "$name" | tr '-' '_')
+        THERMAL_ZONE_NAMES="$THERMAL_ZONE_NAMES $normalized "
+    done
+}
+
+show_thermal_zones() {
+    found=0
+
+    for zone in /sys/class/thermal/thermal_zone*; do
+        [ -r "$zone/temp" ] || continue
+        found=1
+
+        name=$(cat "$zone/type" 2>/dev/null || echo "unknown")
+        temp=$(cat "$zone/temp" 2>/dev/null || echo "0")
+
+        awk -v name="$name" -v temp="$temp" \
+            'BEGIN { printf "%-24s %.1f°C\n", name ":", temp / 1000 }'
+    done
+
+    [ "$found" -eq 1 ] || echo "No thermal zones found in /sys/class/thermal/"
+}
+
+show_hwmon_temps() {
+    for hwmon in /sys/class/hwmon/hwmon*; do
+        [ -d "$hwmon" ] || continue
+
+        name=$(cat "$hwmon/name" 2>/dev/null || echo "unknown")
+
+        # Skip non-temperature hwmon devices
+        ls "$hwmon"/temp*_input >/dev/null 2>&1 || continue
+
+        # Skip if already covered by thermal_zone (compare normalized names)
+        normalized=$(echo "$name" | tr '-' '_')
+        case "$THERMAL_ZONE_NAMES" in
+            *" ${normalized} "*) continue ;;
+        esac
+
+        for input in "$hwmon"/temp*_input; do
+            [ -r "$input" ] || continue
+
+            # Try to get label, fall back to hwmon name
+            label_file="${input%_input}_label"
+            if [ -r "$label_file" ]; then
+                label=$(cat "$label_file")
+            else
+                label="$name"
+            fi
+
+            temp=$(cat "$input" 2>/dev/null || echo "0")
+            awk -v label="$label" -v temp="$temp" \
+                'BEGIN { printf "%-24s %.1f°C\n", label ":", temp / 1000 }'
+        done
+    done
+}
+
+show_nvme_temps() {
+    nvme_bin=""
+    for bin in /usr/sbin/nvme /usr/bin/nvme; do
+        [ -x "$bin" ] && nvme_bin="$bin" && break
+    done
+
+    for dev in /dev/nvme[0-9]; do
+        [ -e "$dev" ] || continue
+        [ -n "$nvme_bin" ] || {
+            printf "%-24s %s\n" "$(basename "$dev") SSD:" "nvme-cli not installed"
+            continue
+        }
+
+        temp=$(
+            sudo -n "$nvme_bin" smart-log "$dev" 2>/dev/null |
+            awk -F: '
+                /^temperature[[:space:]]*:/ {
+                    value = $2
+                    sub(/^[[:space:]]*/, "", value)
+                    sub(/[^0-9.].*$/, "", value)
+                    print value
+                    exit
+                }
+            '
+        )
+
+        if [ -n "$temp" ]; then
+            printf "%-24s %s°C\n" "$(basename "$dev") SSD:" "$temp"
+        else
+            printf "%-24s %s\n" "$(basename "$dev") SSD:" "unavailable (sudo?)"
+        fi
+    done
+}
+
+show_all() {
+    collect_thermal_zone_names
+    show_thermal_zones
+    show_hwmon_temps
+    show_nvme_temps
+}
+
+case "${1:-}" in
+    "")
+        show_all
+        ;;
+
+    -w|--watch)
+        while true; do
+            printf '\033[2J\033[H'
+            echo "SBC temperatures — $(date)"
+            echo "Press Ctrl+C to exit"
+            echo
+            show_all
+            sleep 1
+        done
+        ;;
+
+    -h|--help)
+        echo "Usage: sbc-temp [-w]"
+        echo
+        echo "Display all available thermal sensors."
+        echo
+        echo "  -w, --watch   Continuously refresh temperatures"
+        echo "  -h, --help    Show this help"
+        ;;
+
+    *)
+        echo "Unknown option: $1" >&2
+        echo "Usage: sbc-temp [-w]" >&2
+        exit 1
+        ;;
+esac

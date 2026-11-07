@@ -1,0 +1,147 @@
+#!/bin/sh
+# q6a-temp — display Radxa Dragon Q6A temperatures with grouped/curated output
+# Usage: q6a-temp [-w] [-a]
+
+set -eu
+
+# Read a thermal zone by name pattern, return temp in millidegrees
+read_zone() {
+    pattern="$1"
+    for zone in /sys/class/thermal/thermal_zone*; do
+        [ -r "$zone/type" ] || continue
+        type=$(cat "$zone/type" 2>/dev/null)
+        case "$type" in
+            $pattern)
+                cat "$zone/temp" 2>/dev/null
+                return
+                ;;
+        esac
+    done
+    echo ""
+}
+
+# Get max temp from multiple zones matching a pattern
+max_zone() {
+    pattern="$1"
+    max=""
+    for zone in /sys/class/thermal/thermal_zone*; do
+        [ -r "$zone/type" ] || continue
+        type=$(cat "$zone/type" 2>/dev/null)
+        case "$type" in
+            $pattern)
+                temp=$(cat "$zone/temp" 2>/dev/null || echo "0")
+                if [ -z "$max" ] || [ "$temp" -gt "$max" ]; then
+                    max="$temp"
+                fi
+                ;;
+        esac
+    done
+    echo "${max:-}"
+}
+
+print_temp() {
+    label="$1"
+    temp="$2"
+    if [ -n "$temp" ] && [ "$temp" != "0" ]; then
+        awk -v label="$label" -v temp="$temp" \
+            'BEGIN { printf "%-20s %.1f°C\n", label ":", temp / 1000 }'
+    fi
+}
+
+show_curated() {
+    echo "=== CPU ==="
+    # Show max of big cores (cpu7-11) and little cores (cpu0-6)
+    big_max=$(max_zone "cpu[789]-thermal")
+    big_max2=$(max_zone "cpu1[01]-thermal")
+    [ -n "$big_max2" ] && [ "$big_max2" -gt "${big_max:-0}" ] && big_max="$big_max2"
+    print_temp "Big cores (max)" "$big_max"
+
+    little_max=$(max_zone "cpu[0-6]-thermal")
+    print_temp "Little cores (max)" "$little_max"
+
+    cpuss=$(max_zone "cpuss*-thermal")
+    print_temp "CPU subsystem" "$cpuss"
+
+    echo
+    echo "=== GPU / NPU ==="
+    gpu=$(max_zone "gpuss*-thermal")
+    print_temp "GPU (max)" "$gpu"
+
+    npu=$(max_zone "nspss*-thermal")
+    print_temp "NPU (max)" "$npu"
+
+    echo
+    echo "=== Memory / Storage ==="
+    ddr=$(read_zone "ddr-thermal")
+    print_temp "DDR" "$ddr"
+
+    ufs=$(read_zone "ufs-thermal")
+    print_temp "UFS storage" "$ufs"
+
+    echo
+    echo "=== System ==="
+    skin=$(read_zone "msm-skin-thermal")
+    print_temp "Skin" "$skin"
+
+    quiet=$(read_zone "quiet-thermal")
+    print_temp "Quiet zone" "$quiet"
+
+    # PMIC temps
+    pm7250b=$(read_zone "pm7250b-thermal")
+    print_temp "PM7250B PMIC" "$pm7250b"
+
+    pm7325=$(read_zone "pm7325-thermal")
+    print_temp "PM7325 PMIC" "$pm7325"
+}
+
+show_all() {
+    for zone in /sys/class/thermal/thermal_zone*; do
+        [ -r "$zone/temp" ] || continue
+        name=$(cat "$zone/type" 2>/dev/null || echo "unknown")
+        temp=$(cat "$zone/temp" 2>/dev/null || echo "0")
+        awk -v name="$name" -v temp="$temp" \
+            'BEGIN { printf "%-24s %.1f°C\n", name ":", temp / 1000 }'
+    done
+}
+
+case "${1:-}" in
+    "")
+        show_curated
+        ;;
+
+    -a|--all)
+        show_all
+        ;;
+
+    -w|--watch)
+        mode="${2:---curated}"
+        while true; do
+            printf '\033[2J\033[H'
+            echo "Radxa Dragon Q6A temperatures — $(date)"
+            echo "Press Ctrl+C to exit"
+            echo
+            case "$mode" in
+                -a|--all) show_all ;;
+                *) show_curated ;;
+            esac
+            sleep 1
+        done
+        ;;
+
+    -h|--help)
+        echo "Usage: q6a-temp [-w] [-a]"
+        echo
+        echo "Display Radxa Dragon Q6A thermal sensors."
+        echo
+        echo "  -a, --all     Show all 33 thermal zones (default: curated view)"
+        echo "  -w, --watch   Continuously refresh temperatures"
+        echo "  -w -a         Watch mode with all sensors"
+        echo "  -h, --help    Show this help"
+        ;;
+
+    *)
+        echo "Unknown option: $1" >&2
+        echo "Usage: q6a-temp [-w] [-a]" >&2
+        exit 1
+        ;;
+esac

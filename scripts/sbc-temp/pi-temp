@@ -1,0 +1,104 @@
+#!/bin/sh
+# pi-temp — display Raspberry Pi temperatures with friendly labels
+# Usage: pi-temp [-w]
+
+set -eu
+
+show_temperatures() {
+    # CPU temperature (primary)
+    if [ -r /sys/class/thermal/thermal_zone0/temp ]; then
+        temp=$(cat /sys/class/thermal/thermal_zone0/temp)
+        awk -v temp="$temp" 'BEGIN { printf "%-20s %.1f°C\n", "CPU:", temp / 1000 }'
+    elif command -v vcgencmd >/dev/null 2>&1; then
+        # Fallback to vcgencmd on older Pis
+        temp=$(vcgencmd measure_temp | sed "s/temp=//;s/'C//")
+        printf "%-20s %s°C\n" "CPU:" "$temp"
+    fi
+
+    # RP1 southbridge (Pi 5 only) — check hwmon by name
+    for hwmon in /sys/class/hwmon/hwmon*; do
+        [ -d "$hwmon" ] || continue
+        name=$(cat "$hwmon/name" 2>/dev/null || continue)
+        case "$name" in
+            rp1_adc)
+                if [ -r "$hwmon/temp1_input" ]; then
+                    temp=$(cat "$hwmon/temp1_input")
+                    awk -v temp="$temp" 'BEGIN { printf "%-20s %.1f°C\n", "RP1 (southbridge):", temp / 1000 }'
+                fi
+                ;;
+        esac
+    done
+
+    # PMIC temperature (if available on some Pi models)
+    for hwmon in /sys/class/hwmon/hwmon*; do
+        [ -d "$hwmon" ] || continue
+        name=$(cat "$hwmon/name" 2>/dev/null || continue)
+        case "$name" in
+            rpi_pmic)
+                if [ -r "$hwmon/temp1_input" ]; then
+                    temp=$(cat "$hwmon/temp1_input")
+                    awk -v temp="$temp" 'BEGIN { printf "%-20s %.1f°C\n", "PMIC:", temp / 1000 }'
+                fi
+                ;;
+        esac
+    done
+
+    # NVMe if present (Pi 5 with HAT)
+    if [ -e /dev/nvme0 ]; then
+        nvme_bin=""
+        for bin in /usr/sbin/nvme /usr/bin/nvme; do
+            [ -x "$bin" ] && nvme_bin="$bin" && break
+        done
+
+        if [ -n "$nvme_bin" ]; then
+            temp=$(
+                sudo -n "$nvme_bin" smart-log /dev/nvme0 2>/dev/null |
+                awk -F: '/^temperature[[:space:]]*:/ {
+                    v = $2; sub(/^[[:space:]]*/, "", v); sub(/[^0-9.].*$/, "", v); print v; exit
+                }'
+            )
+            if [ -n "$temp" ]; then
+                printf "%-20s %s°C\n" "NVMe SSD:" "$temp"
+            fi
+        fi
+    fi
+
+    # GPU memory temperature via vcgencmd (same as CPU on most Pis)
+    # Uncomment if you want to show it separately:
+    # if command -v vcgencmd >/dev/null 2>&1; then
+    #     temp=$(vcgencmd measure_temp | sed "s/temp=//;s/'C//")
+    #     printf "%-20s %s°C\n" "GPU (vcgencmd):" "$temp"
+    # fi
+}
+
+case "${1:-}" in
+    "")
+        show_temperatures
+        ;;
+
+    -w|--watch)
+        while true; do
+            printf '\033[2J\033[H'
+            echo "Raspberry Pi temperatures — $(date)"
+            echo "Press Ctrl+C to exit"
+            echo
+            show_temperatures
+            sleep 1
+        done
+        ;;
+
+    -h|--help)
+        echo "Usage: pi-temp [-w]"
+        echo
+        echo "Display Raspberry Pi thermal sensors with friendly labels."
+        echo
+        echo "  -w, --watch   Continuously refresh temperatures"
+        echo "  -h, --help    Show this help"
+        ;;
+
+    *)
+        echo "Unknown option: $1" >&2
+        echo "Usage: pi-temp [-w]" >&2
+        exit 1
+        ;;
+esac
